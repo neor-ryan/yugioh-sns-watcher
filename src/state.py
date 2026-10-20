@@ -9,8 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "state" / "state.json"
 
 DEFAULT_STATE = {
-    "x_user_id": None,
-    "x_since_id": None,
+    "x_accounts": {},  # {ユーザー名: {"user_id": ..., "since_id": ...}}
     "site_seen_ids": [],
     "last_run": None,
 }

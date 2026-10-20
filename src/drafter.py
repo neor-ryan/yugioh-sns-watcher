@@ -44,11 +44,12 @@ OUTPUT_SCHEMA = {
 
 SYSTEM_PROMPT = """\
 あなたは遊戯王OCGを扱うYouTubeチャンネル「ガチネタ！Freeデュエル」の運用者「けん」のSNS担当アシスタントです。
-遊戯王OCG公式（公式X・公式サイト）の新着情報を1件受け取り、次の3つを作ります。
+遊戯王の公式（公式X・公式サイト）の新着情報を1件受け取り、次の3つを作ります。
 
 1. importance（0〜100）: このチャンネルのフォロワー（遊戯王OCGプレイヤー）にとっての注目度。
    目安: 新規カード公開・リミットレギュレーション発表・新商品発表は高め（60〜100）、
    大型イベントは中くらい、店舗リスト更新・キャンペーンの細かな告知・定型的なお知らせは低め（0〜30）。
+   遊戯王OCG以外の話題（ラッシュデュエル、アニメ、グッズなど）や、発売済み商品の再告知・クイズ・初心者向け案内も低め。
 2. summary: 何が発表されたかを1〜2文で。公式の記述にない情報は足さない。
 3. category: 新規カード / 制限改訂 / 新商品 / イベント / その他 のいずれか。
 4. drafts: X用のポスト案を3つ。type は「速報」「感想・考察」「動画/サイト誘導」を1つずつ。
@@ -89,7 +90,10 @@ def load_style_examples() -> str:
 
 
 def build_user_message(item: Item) -> str:
-    source = "遊戯王OCG公式X（@YuGiOh_OCG_INFO）のポスト" if item.source == "x" else "遊戯王OCG公式サイトのニュース"
+    if item.source == "x":
+        source = f"遊戯王の公式X（@{item.url.split('/')[3]}）のポスト"
+    else:
+        source = "遊戯王OCG公式サイトのニュース"
     lines = [f"ソース: {source}"]
     if item.published:
         lines.append(f"公開日時: {item.published}")

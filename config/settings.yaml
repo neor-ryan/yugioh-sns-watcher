@@ -16,13 +16,22 @@ sweep:
   skip_margin_minutes: 10
 
 x:
-  username: YuGiOh_OCG_INFO
+  # 監視する公式アカウント
+  accounts:
+    - YuGiOh_OCG_INFO # 遊戯王OCG公式（21:00 に収録カード公開）
+    - yu_gi_oh_jp # 遊☆戯☆王オフィシャルサイト（12:00 に CARDニュース更新）
+  # この時間枠（JST）に投稿されたものだけを取る。15分おきの宣伝ポストは取らない（取らなければ課金もされない）
+  slots_jst:
+    - { start: "11:58", end: "12:10" }
+    - { start: "20:58", end: "21:10" }
+  # 枠の開始から何分間チェックを続けるか。集中監視が起動しなかった日も次の毎時チェックで拾えるよう長めに
+  slot_active_minutes: 90
   api_base: https://api.x.com/2
   # docs.x.com の現行表記は post.fields（旧 tweet.fields）。400 が返るなら切り替える
   fields_param: post.fields
-  max_results: 20 # 5〜100。since_id 付きなので通常は新着分しか返らない
+  max_results: 20 # 5〜100
   max_pages: 3
-  exclude: [replies]
+  exclude: [replies, retweets]
 
 site:
   news_url: https://www.yugioh-card.com/japan/news/

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import main  # noqa: E402
 import notifier  # noqa: E402
 from drafter import Draft, DraftResult, body_length, finalize_text  # noqa: E402
-from sources import Item, official_site  # noqa: E402
+from sources import Item, official_site, x_official  # noqa: E402
 
 BASE = "https://www.yugioh-card.com/japan/news/"
 HTML = """
@@ -76,6 +76,48 @@ class DraftAndNotifyTest(unittest.TestCase):
             self.assertIn("この文面で投稿", embeds[1]["description"])
         for chunk in notifier._chunk_embeds(embeds):
             self.assertLessEqual(sum(notifier._embed_size(e) for e in chunk), 6000)
+
+
+class XSlotTest(unittest.TestCase):
+    def test_snowflake_matches_real_post(self):
+        # @YuGiOh_OCG_INFO 2026-10-20 21:00:01 JST の投稿
+        post_id = 2112514169035477270
+        self.assertLess(x_official.snowflake_at(datetime(2026, 10, 20, 21, 0, 0, tzinfo=main.JST)), post_id)
+        self.assertGreater(x_official.snowflake_at(datetime(2026, 10, 20, 21, 0, 2, tzinfo=main.JST)), post_id)
+
+    def test_check_account_requests_only_slot(self):
+        start = datetime(2026, 10, 20, 20, 58, tzinfo=main.JST)
+        end = datetime(2026, 10, 20, 21, 10, tzinfo=main.JST)
+        calls = []
+
+        def fake_get(cfg, path, params=None):
+            calls.append(params)
+            return {"data": [{"id": "2112514169035477270", "text": "収録カード公開"}], "meta": {}}
+
+        state = {"x_user_id": "618646265", "x_since_id": "100"}  # 旧形式
+        orig = x_official._get
+        x_official._get = fake_get
+        try:
+            cfg = {**SETTINGS["x"], "accounts": ["YuGiOh_OCG_INFO"]}
+            items, failed = x_official.check(state, cfg, (start, end))
+        finally:
+            x_official._get = orig
+        self.assertEqual(failed, 0)
+        self.assertEqual(calls[0]["since_id"], str(x_official.snowflake_at(start)))  # 古い since_id より枠の開始が優先
+        self.assertEqual(calls[0]["end_time"], "2026-10-20T12:10:00Z")
+        self.assertEqual(items[0].url, "https://x.com/YuGiOh_OCG_INFO/status/2112514169035477270")
+        self.assertEqual(state["x_accounts"]["YuGiOh_OCG_INFO"]["since_id"], "2112514169035477270")
+        self.assertNotIn("x_since_id", state)
+
+    def test_current_x_slot(self):
+        def at(h, m):
+            return datetime(2026, 10, 20, h, m, tzinfo=main.JST)
+
+        self.assertIsNone(main.current_x_slot(at(11, 50), SETTINGS))  # 枠の前
+        self.assertEqual(main.current_x_slot(at(12, 5), SETTINGS), (at(11, 58), at(12, 10)))
+        self.assertEqual(main.current_x_slot(at(13, 17), SETTINGS), (at(11, 58), at(12, 10)))  # 取りこぼし回収
+        self.assertIsNone(main.current_x_slot(at(14, 17), SETTINGS))
+        self.assertEqual(main.current_x_slot(at(22, 17), SETTINGS), (at(20, 58), at(21, 10)))
 
 
 class ScheduleTest(unittest.TestCase):

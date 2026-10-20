@@ -76,6 +76,20 @@ def in_window(now: datetime, settings: dict) -> bool:
     return False
 
 
+def current_x_slot(now: datetime, settings: dict) -> tuple[datetime, datetime] | None:
+    """X を見る時間枠（例 11:58〜12:10）のうち、今チェックすべきもの。
+
+    枠の開始から slot_active_minutes の間は有効。集中監視が起動しなかった日も、
+    次の毎時チェック（例 13:17）で枠内の投稿を拾えるように長めにとっている。
+    """
+    active = timedelta(minutes=settings["x"].get("slot_active_minutes", 90))
+    for s in settings["x"]["slots_jst"]:
+        start, end = window_bounds(now, s)
+        if start <= now <= start + active:
+            return start, end
+    return None
+
+
 class Runner:
     def __init__(self, settings: dict, args: argparse.Namespace):
         self.settings = settings
@@ -104,9 +118,24 @@ class Runner:
         cfg = {**self.settings["x"], "user_agent": self.settings["site"]["user_agent"]}
         try:
             if self.args.sample:
-                sample_state = {"x_user_id": self.state.get("x_user_id"), "x_since_id": "1"}
-                return x_official.check(sample_state, {**cfg, "max_results": 5, "max_pages": 1})[-self.args.sample :]
-            return x_official.check(self.state, cfg)
+                # 時間枠を無視して直近24時間の最新投稿を各アカウント5件まで取る（状態は書き換えない）
+                now = datetime.now(JST)
+                sample_state = {
+                    "x_accounts": {
+                        k: {"user_id": v.get("user_id"), "since_id": None}
+                        for k, v in self.state.get("x_accounts", {}).items()
+                    }
+                }
+                items, _ = x_official.check(
+                    sample_state, {**cfg, "max_results": 5, "max_pages": 1}, (now - timedelta(days=1), now)
+                )
+                return items[-self.args.sample :]
+            slot = current_x_slot(datetime.now(JST), self.settings)
+            if slot is None:
+                return []
+            items, failed = x_official.check(self.state, cfg, slot)
+            self.errors += failed
+            return items
         except Exception as e:
             log.error("公式Xの取得に失敗: %s", e)
             self.errors += 1

@@ -1,14 +1,19 @@
-"""遊戯王OCG公式X（@YuGiOh_OCG_INFO）の新着ポストを X API v2 で取得する。
+"""遊戯王の公式X（@YuGiOh_OCG_INFO, @yu_gi_oh_jp）の新着ポストを X API v2 で取得する。
 
-読み取りは返ってきた投稿数で課金されるため、必ず since_id を付けて新着だけを取る。
+公式は15分おきに宣伝ポストを出すが、取り上げる価値のある情報（収録カード公開・CARDニュース）は
+12:00 と 21:00 ちょうどに出る。そこで「時間枠」（例 11:58〜12:10）に投稿されたものだけを取る。
+読み取りは返ってきた投稿数で課金されるので、枠外の投稿は API 側で除外して返させない:
+  since_id = max(前回処理したID, 枠の開始時刻に相当するID)、end_time = 枠の終了時刻
+
 エンドポイント（2026-10時点 docs.x.com）:
   GET https://api.x.com/2/users/by/username/{username}
-  GET https://api.x.com/2/users/{id}/tweets?since_id=...&max_results=5..100
+  GET https://api.x.com/2/users/{id}/tweets?since_id=...&end_time=...&max_results=5..100
 """
 from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -16,9 +21,17 @@ from . import Item
 
 log = logging.getLogger(__name__)
 
+# X の投稿ID（Snowflake）は上位ビットが作成時刻（ミリ秒、この値からの経過）
+SNOWFLAKE_EPOCH_MS = 1288834974657
+
 
 class XApiError(RuntimeError):
     pass
+
+
+def snowflake_at(dt: datetime) -> int:
+    """その時刻より後に作られた投稿だけが since_id で返るような投稿IDを作る。"""
+    return (int(dt.timestamp() * 1000) - SNOWFLAKE_EPOCH_MS) << 22
 
 
 def _get(cfg: dict, path: str, params: dict | None = None) -> dict:
@@ -39,14 +52,23 @@ def _get(cfg: dict, path: str, params: dict | None = None) -> dict:
     return resp.json()
 
 
-def resolve_user_id(state: dict, cfg: dict) -> str:
-    if state.get("x_user_id"):
-        return state["x_user_id"]
-    data = _get(cfg, f"/users/by/username/{cfg['username']}")
-    user_id = data["data"]["id"]
-    state["x_user_id"] = user_id
-    log.info("X: @%s のユーザーIDは %s", cfg["username"], user_id)
-    return user_id
+def _account_state(state: dict, username: str) -> dict:
+    accounts = state.setdefault("x_accounts", {})
+    # 旧形式（公式OCGアカウント1つだけ）からの移行
+    if not accounts and state.get("x_user_id"):
+        accounts["YuGiOh_OCG_INFO"] = {"user_id": state["x_user_id"], "since_id": state.get("x_since_id")}
+    state.pop("x_user_id", None)
+    state.pop("x_since_id", None)
+    return accounts.setdefault(username, {"user_id": None, "since_id": None})
+
+
+def resolve_user_id(acct: dict, cfg: dict, username: str) -> str:
+    if acct.get("user_id"):
+        return acct["user_id"]
+    data = _get(cfg, f"/users/by/username/{username}")
+    acct["user_id"] = data["data"]["id"]
+    log.info("X: @%s のユーザーIDは %s", username, acct["user_id"])
+    return acct["user_id"]
 
 
 def _post_text(post: dict) -> str:
@@ -58,42 +80,39 @@ def _post_text(post: dict) -> str:
     return post.get("text", "")
 
 
-def check(state: dict, cfg: dict) -> list[Item]:
-    """新着を古い順で返し、state["x_since_id"] を更新する。初回は最新IDだけ記録して通知しない。"""
-    user_id = resolve_user_id(state, cfg)
-    since_id = state.get("x_since_id")
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def check_account(state: dict, cfg: dict, username: str, slot: tuple[datetime, datetime]) -> list[Item]:
+    acct = _account_state(state, username)
+    user_id = resolve_user_id(acct, cfg, username)
+    start, end = slot
+    # end_time は現在時刻より少し前でないと弾かれることがある
+    end = min(end, datetime.now(timezone.utc) - timedelta(seconds=15))
+    if end <= start:
+        return []
+    since_id = max(int(acct.get("since_id") or 0), snowflake_at(start))
     params = {
-        "max_results": cfg.get("max_results", 20) if since_id else 5,
+        "since_id": str(since_id),
+        "end_time": _iso(end),
+        "max_results": cfg.get("max_results", 20),
         cfg.get("fields_param", "post.fields"): "created_at,note_post",
     }
     if cfg.get("exclude"):
         params["exclude"] = ",".join(cfg["exclude"])
 
-    if not since_id:
-        data = _get(cfg, f"/users/{user_id}/tweets", params)
-        newest = data.get("meta", {}).get("newest_id")
-        if newest:
-            state["x_since_id"] = newest
-            log.info("X: 初回実行のため since_id=%s から監視を始めます", newest)
-        return []
-
-    params["since_id"] = since_id
     posts: list[dict] = []
-    newest_id = since_id
-    pages = 0
-    while True:
+    for _ in range(cfg.get("max_pages", 3)):
         data = _get(cfg, f"/users/{user_id}/tweets", params)
-        meta = data.get("meta", {})
         posts.extend(data.get("data", []))
-        if pages == 0 and meta.get("newest_id"):
-            newest_id = meta["newest_id"]
-        pages += 1
-        token = meta.get("next_token")
-        if not token or pages >= cfg.get("max_pages", 3):
+        token = data.get("meta", {}).get("next_token")
+        if not token:
             break
         params["pagination_token"] = token
 
-    state["x_since_id"] = newest_id
+    if posts:
+        acct["since_id"] = str(max(since_id, *(int(p["id"]) for p in posts)))
     items = []
     for post in sorted(posts, key=lambda p: int(p["id"])):
         text = _post_text(post)
@@ -103,8 +122,21 @@ def check(state: dict, cfg: dict) -> list[Item]:
                 id=post["id"],
                 title=text.splitlines()[0][:80] if text else "",
                 text=text,
-                url=f"https://x.com/{cfg['username']}/status/{post['id']}",
+                url=f"https://x.com/{username}/status/{post['id']}",
                 published=post.get("created_at"),
             )
         )
     return items
+
+
+def check(state: dict, cfg: dict, slot: tuple[datetime, datetime]) -> tuple[list[Item], int]:
+    """時間枠 slot に投稿された新着を、全アカウント分まとめて古い順で返す。(新着, 失敗したアカウント数)"""
+    items: list[Item] = []
+    failed = 0
+    for username in cfg["accounts"]:
+        try:
+            items += check_account(state, cfg, username, slot)
+        except (XApiError, requests.RequestException) as e:
+            log.error("X: @%s の取得に失敗: %s", username, e)
+            failed += 1
+    return sorted(items, key=lambda it: int(it.id)), failed

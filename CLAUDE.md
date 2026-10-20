@@ -23,7 +23,10 @@
 
 | ソース | 取得方法 | 備考 |
 |---|---|---|
-| 遊戯王OCG公式X `@YuGiOh_OCG_INFO` | X API v2 のユーザー投稿取得（`since_id` で新着のみ） | アプリ専用のBearerトークンで読み取りのみ |
+| 遊戯王OCG公式X `@YuGiOh_OCG_INFO` | X API v2 のユーザー投稿取得（`since_id` で新着のみ） | アプリ専用のBearerトークンで読み取りのみ。21:00 に収録カード公開 |
+| 遊☆戯☆王オフィシャルサイトX `@yu_gi_oh_jp` | 同上 | 12:00 に「CARDニュース(OCG)」更新 |
+
+- 公式Xは15分おきに宣伝ポスト（Q&Aクイズ、収録済みカードの再告知、初心者向け案内など）を出すが、取り上げる価値があるのは 12:00 / 21:00 ちょうどの投稿だけ（本人確認済み、2026-10）。そのため X は **11:58〜12:10 / 20:58〜21:10 の時間枠に投稿されたものだけ** を取る。
 | 遊戯王OCG公式サイト `https://www.yugioh-card.com/japan/` | HTML取得→ニュース一覧をパース | 実装前にページ構造・RSSの有無・robots.txtを確認すること |
 
 - X APIは従量課金。読み取りは返ってきた投稿の件数で課金されるため、**必ず `since_id` を使い新着だけを取る**。
@@ -55,8 +58,7 @@ GitHub Actions の cron（UTC表記）：
 
 ```json
 {
-  "x_user_id": "公式XのユーザーID（初回に解決してキャッシュ）",
-  "x_since_id": "最後に処理した公式Xの投稿ID",
+  "x_accounts": {"YuGiOh_OCG_INFO": {"user_id": "初回に解決してキャッシュ", "since_id": "最後に処理した投稿ID"}},
   "site_seen_ids": ["処理済みのニュースのURLまたはID（直近200件程度）"],
   "last_run": "ISO8601"
 }
@@ -171,7 +173,10 @@ GitHub Actions の cron（UTC表記）：
 - **公式サイト**：RSSなし、`robots.txt` は404（制限なし）。`/japan/news/` に `section.news-list` が4つ（おしらせ・重要なおしらせ・キャンペーン・ルール改訂、計80件弱）。各 `li > a` にタイトルと `<time>YYYY/M/D</time>`。IDは正規化した絶対URL（`//` を1つに畳む。`#date...` のアンカーは記事の区別に使うので残す）。
   - `site_seen_ids` は上限200件だが、ページに載っているIDは上限を超えても消さない（消すと再通知になる）。
   - 一覧から取るのはタイトルだけ。記事本文は取りに行かない（アクセスを控えめにするため）。
-- **X API**：`GET https://api.x.com/2/users/by/username/{username}` → `GET /2/users/{id}/tweets?since_id=...`。docs.x.com ではフィールド指定が `post.fields`、長文は `note_post`（旧 `tweet.fields` / `note_tweet`）。400が返る場合は `settings.yaml` の `x.fields_param` を `tweet.fields` に戻す。リプライは除外（`exclude=replies`）。
+- **X API**：`GET https://api.x.com/2/users/by/username/{username}` → `GET /2/users/{id}/tweets?since_id=...&end_time=...`。docs.x.com ではフィールド指定が `post.fields`、長文は `note_post`（旧 `tweet.fields` / `note_tweet`）。400が返る場合は `settings.yaml` の `x.fields_param` を `tweet.fields` に戻す。リプライ・リポストは除外。
+  - 時間枠の絞り込みは API 側でやる（枠外の投稿は返させない＝課金されない）。`since_id = max(保存済みID, 枠の開始時刻から作ったSnowflake ID)`、`end_time = 枠の終了`。投稿IDは `(ミリ秒 - 1288834974657) << 22` で時刻から作れる。`since_id+end_time` / `start_time+end_time` / `since_id+until_id` のどれも期待どおり動くことを確認済み。
+  - X は枠の開始から90分だけチェックする（`slot_active_minutes`）。集中監視が起動しなかった日も、次の毎時チェック（13:17 / 22:17）で拾える。
+  - 旧形式の状態（`x_user_id` / `x_since_id`）は読み込み時に `x_accounts.YuGiOh_OCG_INFO` へ移す。
 - **Claude API**：構造化出力（`output_config.format` の JSON Schema）で受け取る。`effort: medium`。安全分類器の誤拒否対策として server-side fallback（`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`）を有効化。問題があれば `claude.fallbacks: false`。
   - URL はモデルに書かせず、コード側で本文末尾に付ける（X元ネタなら投稿URL＝引用表示、サイトなら記事URL）。
 - **Discord**：投稿リンクは日本語をURLエンコードすると1案あたり1300字前後になるため、案ごとに embed を分け、embed合計6000字を超える場合はメッセージを分割する。
