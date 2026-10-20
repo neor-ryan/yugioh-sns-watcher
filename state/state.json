@@ -1,6 +1,6 @@
 {
-  "x_user_id": null,
-  "x_since_id": null,
+  "x_user_id": "618646265",
+  "x_since_id": "2112544365034033266",
   "site_seen_ids": [
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202610",
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202607",
@@ -81,5 +81,5 @@
     "https://www.yugioh-card.com/japan/revision/#date20140401",
     "https://www.yugioh-card.com/japan/revision/#date20140308"
   ],
-  "last_run": "2026-10-20T19:20:09+00:00"
+  "last_run": "2026-10-20T19:37:44+00:00"
 }
