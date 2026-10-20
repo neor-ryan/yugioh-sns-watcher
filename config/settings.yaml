@@ -1,0 +1,47 @@
+# 重要度がこの値未満の新着は個別通知しない
+importance_threshold: 30
+# 重要度が低い新着の扱い: digest = 実行の最後にまとめて1通 / skip = 通知しない
+low_importance: digest
+
+window:
+  # 集中監視の時間帯（JST）。Actionsの起動が遅れても end まではループする
+  times_jst:
+    - { start: "11:50", end: "12:40" }
+    - { start: "20:50", end: "21:40" }
+  x_interval_seconds: 75
+  site_interval_seconds: 150
+
+sweep:
+  # 集中監視の時間帯 ± この分数は通常監視をスキップ
+  skip_margin_minutes: 10
+
+x:
+  username: YuGiOh_OCG_INFO
+  api_base: https://api.x.com/2
+  # docs.x.com の現行表記は post.fields（旧 tweet.fields）。400 が返るなら切り替える
+  fields_param: post.fields
+  max_results: 20 # 5〜100。since_id 付きなので通常は新着分しか返らない
+  max_pages: 3
+  exclude: [replies]
+
+site:
+  news_url: https://www.yugioh-card.com/japan/news/
+  user_agent: "yugioh-sns-watcher/0.1 (personal notification bot)"
+  seen_limit: 200
+
+claude:
+  model: claude-sonnet-5-5
+  effort: medium
+  max_tokens: 16000
+  # 安全分類器の誤拒否時にサーバー側で別モデルへ切り替える（beta）。不具合が出たら false
+  fallbacks: true
+
+drafts:
+  max_chars: 140
+  # 「動画/サイト誘導」案の末尾に付けるURL（チャンネルURLなど）。空なら付けない
+  promo_url: ""
+
+discord:
+  username: 遊戯王SNSウォッチャー
+  # 動かない場合は https://twitter.com/intent/tweet を試す
+  intent_base: https://x.com/intent/post
