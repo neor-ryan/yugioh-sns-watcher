@@ -85,8 +85,9 @@ def _chunk_embeds(embeds: list[dict]) -> list[list[dict]]:
     return chunks
 
 
-def send(payload: dict, settings: dict) -> None:
-    url = os.environ.get("DISCORD_WEBHOOK_URL")
+def send(payload: dict, settings: dict, webhook_env: str = "DISCORD_WEBHOOK_URL") -> None:
+    """webhook_env の Webhook に送る。未設定なら DISCORD_WEBHOOK_URL（メインのチャンネル）に送る。"""
+    url = os.environ.get(webhook_env) or os.environ.get("DISCORD_WEBHOOK_URL")
     if not url:
         raise RuntimeError("DISCORD_WEBHOOK_URL が設定されていません")
     payload = {"username": settings["discord"].get("username", "遊戯王SNSウォッチャー"), **payload}
@@ -147,8 +148,9 @@ def build_promo_embeds(video, highlight, scene_url: str, result, settings: dict)
 
 
 def notify_promo(video, highlight, scene_url: str, result, settings: dict) -> None:
+    # 宣伝は専用チャンネルへ（DISCORD_PROMO_WEBHOOK_URL が無ければメインのチャンネル）
     for chunk in _chunk_embeds(build_promo_embeds(video, highlight, scene_url, result, settings)):
-        send({"embeds": chunk}, settings)
+        send({"embeds": chunk}, settings, webhook_env="DISCORD_PROMO_WEBHOOK_URL")
 
 
 def notify_raw(item: Item, settings: dict, reason: str) -> None:
