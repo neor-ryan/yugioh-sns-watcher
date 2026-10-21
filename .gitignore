@@ -1,4 +1,7 @@
 .env
+# Google（YouTube）の認証ファイル
+client_secret*.json
+google_token*.json
 __pycache__/
 *.pyc
 .venv/
