@@ -69,7 +69,7 @@ GitHub Actions の cron（UTC表記）：
 
 ## 5. 判定・下書き（Claude API）
 
-- モデル：`claude-sonnet-5-5`
+- モデル：`claude-haiku-5-5`（2026-10-21 に `claude-sonnet-5-5` から変更。同じニュースで比べて、本人が手直しする前提なら十分と判断。料金は約20分の1）
 - 入力：新着1件の本文（＋公式サイトならタイトル・URL）、`config/style_examples.md` の過去ポスト
 - 出力はJSONで受け取る：
 
@@ -178,7 +178,7 @@ GitHub Actions の cron（UTC表記）：
   - 時間枠の絞り込みは API 側でやる（枠外の投稿は返させない＝課金されない）。`since_id = max(保存済みID, 枠の開始時刻から作ったSnowflake ID)`、`end_time = 枠の終了`。投稿IDは `(ミリ秒 - 1288834974657) << 22` で時刻から作れる。`since_id+end_time` / `start_time+end_time` / `since_id+until_id` のどれも期待どおり動くことを確認済み。
   - X は枠の開始から90分だけチェックする（`slot_active_minutes`）。集中監視が起動しなかった日も、次の毎時チェック（13:17 / 22:17）で拾える。
   - 旧形式の状態（`x_user_id` / `x_since_id`）は読み込み時に `x_accounts.YuGiOh_OCG_INFO` へ移す。
-- **Claude API**：構造化出力（`output_config.format` の JSON Schema）で受け取る。`effort: medium`。安全分類器の誤拒否対策として server-side fallback（`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`）を有効化。問題があれば `claude.fallbacks: false`。
+- **Claude API**：構造化出力（`output_config.format` の JSON Schema）で受け取る。`effort: medium`。server-side fallback（`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`）は Sonnet では使えるが Haiku は非対応なので、Haiku の間は `claude.fallbacks: false`。
   - URL はモデルに書かせず、コード側で本文末尾に付ける（X元ネタなら投稿URL＝引用表示、サイトなら記事URL）。
 - **Discord**：投稿リンクは日本語をURLエンコードすると1案あたり1300字前後になるため、案ごとに embed を分け、embed合計6000字を超える場合はメッセージを分割する。
 - **エラー**：取得・通知に失敗しても監視は止めず、最後に終了コード1で返す（Actions上で赤くなる）。下書き生成に失敗した新着は「新着あり」だけ通知する。

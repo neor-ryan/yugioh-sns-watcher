@@ -39,11 +39,12 @@ site:
   seen_limit: 200
 
 claude:
-  model: claude-sonnet-5-5
+  # 2026-10-21 に Sonnet から切り替え（料金約20分の1。本人が毎回手直しするため十分）。戻すなら claude-sonnet-5-5
+  model: claude-haiku-5-5
   effort: medium
   max_tokens: 16000
-  # 安全分類器の誤拒否時にサーバー側で別モデルへ切り替える（beta）。不具合が出たら false
-  fallbacks: true
+  # 安全分類器の誤拒否時にサーバー側で別モデルへ切り替える（beta）。Haiku は非対応なので false。Sonnet に戻すなら true
+  fallbacks: false
 
 drafts:
   max_chars: 140
