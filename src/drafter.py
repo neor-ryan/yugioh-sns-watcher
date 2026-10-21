@@ -118,8 +118,27 @@ def finalize_text(text: str, item: Item, draft_type: str, settings: dict) -> str
 
 
 def draft(item: Item, settings: dict, client: anthropic.Anthropic | None = None) -> DraftResult | None:
-    cfg = settings["claude"]
     system = SYSTEM_PROMPT.format(style_examples=load_style_examples())
+    data = _request_json(system, build_user_message(item), OUTPUT_SCHEMA, settings, client)
+    if data is None:
+        return None
+    drafts = [
+        Draft(type=d["type"], text=finalize_text(d["text"], item, d["type"], settings))
+        for d in data.get("drafts", [])
+    ]
+    return DraftResult(
+        importance=max(0, min(100, int(data.get("importance", 0)))),
+        summary=data.get("summary", ""),
+        category=data.get("category", "その他"),
+        drafts=drafts,
+    )
+
+
+def _request_json(
+    system: str, user_message: str, schema: dict, settings: dict, client: anthropic.Anthropic | None = None
+) -> dict | None:
+    """構造化出力で Claude を呼び、JSON を dict で返す。失敗したら None。"""
+    cfg = settings["claude"]
     kwargs = dict(
         model=cfg["model"],
         max_tokens=cfg.get("max_tokens", 16000),
@@ -127,9 +146,9 @@ def draft(item: Item, settings: dict, client: anthropic.Anthropic | None = None)
         cache_control={"type": "ephemeral"},
         output_config={
             "effort": cfg.get("effort", "medium"),
-            "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
+            "format": {"type": "json_schema", "schema": schema},
         },
-        messages=[{"role": "user", "content": build_user_message(item)}],
+        messages=[{"role": "user", "content": user_message}],
     )
     try:
         client = client or anthropic.Anthropic()
@@ -162,20 +181,102 @@ def draft(item: Item, settings: dict, client: anthropic.Anthropic | None = None)
 
     text = next((b.text for b in response.content if b.type == "text"), "")
     try:
-        data = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError:
         log.error("Claude の出力がJSONとして読めません: %s", text[:300])
         return None
 
-    drafts = [
-        Draft(type=d["type"], text=finalize_text(d["text"], item, d["type"], settings))
-        for d in data.get("drafts", [])
+
+# ---- 過去動画の宣伝 ----
+
+PROMO_TYPES = ["見どころ紹介", "振り返り", "おすすめ"]
+
+PROMO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scene": {"type": "string", "description": "見どころシーンを一言で（20字程度）"},
+        "drafts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": PROMO_TYPES},
+                    "text": {"type": "string"},
+                },
+                "required": ["type", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["scene", "drafts"],
+    "additionalProperties": False,
+}
+
+PROMO_SYSTEM_PROMPT = """\
+あなたは遊戯王OCGを扱うYouTubeチャンネル「ガチネタ！Freeデュエル」の運用者「けん」のSNS担当アシスタントです。
+チャンネルの過去動画を1本受け取り、その動画を改めて紹介するX用のポスト案を作ります。
+けんは投稿時に、見どころシーンのスクリーンショットを1枚添付します。
+
+作るもの:
+1. scene: 見どころシーンを一言で（20字程度）。視聴者コメントがあればそれを根拠にする。
+2. drafts: ポスト案を3つ。type は「見どころ紹介」「振り返り」「おすすめ」を1つずつ。
+   - 見どころ紹介: 添付するシーンに注目させる（「○分○秒〜のここ」のように時刻に触れてもよい）
+   - 振り返り: 投稿当時を振り返る、作者目線の一言
+   - おすすめ: まだ見ていない人に向けて、どんな人に刺さる動画かを伝える
+
+ルール:
+- 日本語で、本文は140文字以内。動画のURLはシステムが末尾に付けるので、本文にURLを書かない。
+- けんの口調に寄せる（下の過去ポスト例を参考に）。一人称は単数。テンションは控えめ〜普通。わざとらしく叫ばない。
+- 根拠は動画タイトルと視聴者コメントだけ。書かれていないデッキの動き・結末・カード名を作らない。
+- 視聴者コメントは引用せず、内容を参考にする。コメントした人を特定できる書き方はしない。
+- ハッシュタグは0〜2個まで（例: #遊戯王 #ガチネタ）。
+- 動画を添付する前提の案は出さない（KONAMIの動画投稿ガイドラインでXへの動画投稿は不可）。
+- 「過去動画の宣伝です」のような前置きは書かない。
+
+## けんの過去ポスト例（口調の参考）
+{style_examples}
+"""
+
+
+@dataclass
+class PromoResult:
+    scene: str
+    drafts: list[Draft] = field(default_factory=list)
+
+
+def build_promo_message(video, highlight, scene_url: str) -> str:
+    from youtube import mmss
+
+    lines = [
+        f"動画タイトル: {video.title}",
+        f"公開日: {video.published[:10]}",
+        f"再生回数: {video.views:,}回",
+        f"長さ: {mmss(video.duration)}",
     ]
-    return DraftResult(
-        importance=max(0, min(100, int(data.get("importance", 0)))),
-        summary=data.get("summary", ""),
-        category=data.get("category", "その他"),
-        drafts=drafts,
+    if highlight.reason == "none":
+        lines.append("見どころシーン: 特定できなかった（動画全体を紹介する）")
+    else:
+        basis = {
+            "both": "視聴者維持率が前後より高く、視聴者のコメントも集まっている場所",
+            "comment": "視聴者のコメントで時刻付きで触れられている場所",
+            "retention": "視聴者維持率が前後より高い（よく見返されている）場所",
+        }[highlight.reason]
+        lines.append(f"見どころシーン: {mmss(highlight.seconds)}（{basis}）")
+    if highlight.comments:
+        lines.append("見どころ付近の視聴者コメント:")
+        lines += [f"- {c.text[:200]}（いいね{c.likes}）" for c in highlight.comments]
+    lines.append(f"リンク: {scene_url}")
+    return "\n".join(lines)
+
+
+def draft_promo(video, highlight, scene_url: str, settings: dict, client: anthropic.Anthropic | None = None) -> PromoResult | None:
+    system = PROMO_SYSTEM_PROMPT.format(style_examples=load_style_examples())
+    data = _request_json(system, build_promo_message(video, highlight, scene_url), PROMO_SCHEMA, settings, client)
+    if data is None:
+        return None
+    return PromoResult(
+        scene=data.get("scene", ""),
+        drafts=[Draft(type=d["type"], text=d["text"].strip() + "\n" + scene_url) for d in data.get("drafts", [])],
     )
 
 

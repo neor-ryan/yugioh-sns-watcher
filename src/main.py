@@ -19,6 +19,7 @@ import yaml
 
 import drafter
 import notifier
+import promo
 import state as state_mod
 from drafter import Draft, DraftResult
 from sources import Item, official_site, x_official
@@ -187,6 +188,23 @@ class Runner:
         self.process(items)
         self.flush_digest()
 
+    def run_promo(self, force: bool = False) -> None:
+        """過去動画の宣伝。通常監視のついでに、配信時刻（19時）を過ぎて今日まだなら1本出す。"""
+        cfg = self.settings.get("promo") or {}
+        if not cfg.get("enabled"):
+            return
+        if not os.environ.get("YOUTUBE_API_KEY"):
+            log.warning("YOUTUBE_API_KEY が無いので過去動画の宣伝はスキップします")
+            return
+        if not force and not promo.is_due(datetime.now(JST), self.state, cfg):
+            return
+        try:
+            promo.run(self.state, self.settings, dry_run=self.dry_run)
+        except Exception as e:
+            log.error("過去動画の宣伝に失敗: %s", e)
+            self.errors += 1
+        self.save()
+
     def run_window(self, end: datetime) -> None:
         wcfg = self.settings["window"]
         log.info("集中監視を %s (JST) まで続けます", end.strftime("%H:%M"))
@@ -260,7 +278,8 @@ def test_notify(settings: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="遊戯王OCG公式情報の監視とポスト案通知")
-    parser.add_argument("--mode", choices=["window", "sweep"], default="sweep")
+    parser.add_argument("--mode", choices=["window", "sweep", "promo"], default="sweep",
+                        help="promo = 過去動画の宣伝を今すぐ1本出す")
     parser.add_argument("--dry-run", action="store_true", help="通知・状態保存をせず標準出力に出す")
     parser.add_argument("--test-notify", action="store_true", help="ダミーの新着でDiscord通知を確認")
     parser.add_argument("--sample", type=int, default=0, help="既読を無視して最新N件を新着扱いにする（--dry-run用）")
@@ -289,6 +308,9 @@ def main() -> int:
             log.info("集中監視の時間帯なので通常監視はスキップします")
             return 0
         runner.run_once()
+        runner.run_promo()
+    elif args.mode == "promo":
+        runner.run_promo(force=True)
     else:
         end = now + timedelta(minutes=args.minutes) if args.minutes else current_window_end(now, settings)
         if end is None:

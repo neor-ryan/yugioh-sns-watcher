@@ -1,6 +1,7 @@
 """state/state.json の読み書き。"""
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,12 +12,13 @@ STATE_PATH = ROOT / "state" / "state.json"
 DEFAULT_STATE = {
     "x_accounts": {},  # {ユーザー名: {"user_id": ..., "since_id": ...}}
     "site_seen_ids": [],
+    "promo": {"last_date": None, "history": {}},  # 過去動画の宣伝（history: {動画ID: 宣伝した日}）
     "last_run": None,
 }
 
 
 def load(path: Path = STATE_PATH) -> dict:
-    state = dict(DEFAULT_STATE)
+    state = copy.deepcopy(DEFAULT_STATE)
     if path.exists():
         text = path.read_text(encoding="utf-8").strip()
         if text:

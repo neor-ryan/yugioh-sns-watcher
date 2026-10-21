@@ -1,13 +1,16 @@
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import drafter  # noqa: E402
 import main  # noqa: E402
 import notifier  # noqa: E402
+import promo  # noqa: E402
+import youtube  # noqa: E402
 from drafter import Draft, DraftResult, body_length, finalize_text  # noqa: E402
 from sources import Item, official_site, x_official  # noqa: E402
 
@@ -118,6 +121,68 @@ class XSlotTest(unittest.TestCase):
         self.assertEqual(main.current_x_slot(at(13, 17), SETTINGS), (at(11, 58), at(12, 10)))  # 取りこぼし回収
         self.assertIsNone(main.current_x_slot(at(14, 17), SETTINGS))
         self.assertEqual(main.current_x_slot(at(22, 17), SETTINGS), (at(20, 58), at(21, 10)))
+
+
+class PromoTest(unittest.TestCase):
+    def video(self, vid="v1", title="【#遊戯王】対戦【#ガチネタ】#100", published="2025-01-01T00:00:00Z", duration=1200, views=1000):
+        return youtube.Video(id=vid, title=title, published=published, duration=duration, views=views)
+
+    def test_parse_duration(self):
+        self.assertEqual(youtube.parse_duration("PT32M34S"), 1954)
+        self.assertEqual(youtube.parse_duration("PT1H2M"), 3720)
+
+    def test_candidates_filters(self):
+        today = date(2026, 10, 22)
+        cfg = SETTINGS["promo"]
+        vids = [
+            self.video("ok"),
+            self.video("wpp", title="神回【#ガチネタ】#WPP2"),
+            self.video("notice", title="【新企画】ガチネタゼミ、正式スタートします！"),
+            self.video("short", duration=60),
+            self.video("new", published="2026-10-18T00:00:00Z"),
+            self.video("recent", ),
+        ]
+        history = {"recent": "2026-09-01", "ok": "2026-01-01"}
+        got = [v.id for v in promo.candidates(vids, history, cfg, today)]
+        self.assertEqual(got, ["ok", "wpp"])
+
+    def test_pick_highlight_prefers_overlap(self):
+        v = self.video(duration=1954)
+        comments = [
+            youtube.Comment(1382, "23:02 故・アーミライルか！", 18),
+            youtube.Comment(1855, "30:55 ゲス声になりながら〜好きw", 16),
+        ]
+        spikes = [(332, 0.05), (1856, 0.04)]
+        h = youtube.pick_highlight(v, comments, spikes)
+        self.assertEqual((h.seconds, h.reason), (1855, "both"))
+        self.assertEqual(youtube.pick_highlight(v, comments, []).seconds, 1382)  # コメントだけ → いいね最多
+        self.assertEqual(youtube.pick_highlight(v, [], spikes).reason, "retention")
+        self.assertEqual(youtube.pick_highlight(v, [], []).reason, "none")
+
+    def test_timestamp_regex(self):
+        found = [m.group(0) for m in youtube.TIMESTAMP_RE.finditer("19:12~ と 1:02:03 と 29:50〜")]
+        self.assertEqual(found, ["19:12", "29:50"])  # h:mm:ss は対象外
+
+    def test_scene_url_and_due(self):
+        v = self.video("abc")
+        self.assertEqual(youtube.scene_url(v, 1855), "https://youtu.be/abc?t=1850")
+        self.assertEqual(youtube.scene_url(v, 3), "https://youtu.be/abc")
+        cfg = SETTINGS["promo"]
+        at = lambda h: datetime(2026, 10, 22, h, 17, tzinfo=main.JST)  # noqa: E731
+        self.assertFalse(promo.is_due(at(18), {}, cfg))
+        self.assertTrue(promo.is_due(at(19), {}, cfg))
+        self.assertTrue(promo.is_due(at(22), {"promo": {"last_date": "2026-10-21"}}, cfg))  # 遅れても当日中に出す
+        self.assertFalse(promo.is_due(at(22), {"promo": {"last_date": "2026-10-22"}}, cfg))
+
+    def test_promo_embeds_fit(self):
+        v = self.video(duration=1954)
+        h = youtube.Highlight(1855, "both", 0.04, [youtube.Comment(1855, "30:55 " + "あ" * 300, 16)])
+        drafts = [Draft(t, "い" * 140 + "\nhttps://youtu.be/v1?t=1850") for t in drafter.PROMO_TYPES]
+        embeds = notifier.build_promo_embeds(v, h, "https://youtu.be/v1?t=1850", drafter.PromoResult("見どころ", drafts), SETTINGS)
+        self.assertEqual(len(embeds), 4)
+        self.assertIn("30:50から再生", embeds[0]["description"])
+        for chunk in notifier._chunk_embeds(embeds):
+            self.assertLessEqual(sum(notifier._embed_size(e) for e in chunk), 6000)
 
 
 class ScheduleTest(unittest.TestCase):

@@ -51,6 +51,15 @@ drafts:
   # 「動画/サイト誘導」案の末尾に付けるURL（チャンネルURLなど）。空なら付けない
   promo_url: ""
 
+promo:
+  # 過去動画の宣伝。毎時の通常監視のついでに、hour_jst 時を過ぎて今日まだなら1本出す（19:17ごろ届く）
+  enabled: true
+  hour_jst: 19
+  channel_handle: shirona728
+  min_age_days: 30 # 公開から30日以内の動画は出さない（投稿時に宣伝済みのため）
+  repeat_after_days: 120 # 一度出した動画は120日あける
+  min_duration_seconds: 300
+
 discord:
   username: 遊戯王SNSウォッチャー
   # 動かない場合は https://twitter.com/intent/tweet を試す

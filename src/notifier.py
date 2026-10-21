@@ -42,7 +42,6 @@ def _embed_size(embed: dict) -> int:
 
 
 def build_embeds(item: Item, result: DraftResult, settings: dict) -> list[dict]:
-    intent_base = settings["discord"].get("intent_base", "https://x.com/intent/post")
     head = {
         "title": _clip(f"【{result.category}】{result.summary}", EMBED_TITLE_MAX),
         "url": item.url,
@@ -53,16 +52,22 @@ def build_embeds(item: Item, result: DraftResult, settings: dict) -> list[dict]:
             EMBED_DESC_MAX,
         ),
     }
-    embeds = [head]
+    return [head] + draft_embeds(result.drafts, _color(result.importance), settings)
+
+
+def draft_embeds(drafts, color: int, settings: dict) -> list[dict]:
+    """ポスト案1つにつき embed 1つ（本文＋「この文面で投稿」リンク）。"""
+    intent_base = settings["discord"].get("intent_base", "https://x.com/intent/post")
     limit = settings["drafts"].get("max_chars", 140)
-    for i, d in enumerate(result.drafts, 1):
+    embeds = []
+    for i, d in enumerate(drafts, 1):
         n = body_length(d.text)
         over = f" ⚠️{limit}字超え" if n > limit else ""
         link = intent_url(d.text, intent_base)
         desc = f"```\n{d.text}\n```\n[▶ この文面で投稿]({link})"
         if len(desc) > EMBED_DESC_MAX:
             desc = f"```\n{d.text}\n```\n（本文が長すぎて投稿リンクを作れませんでした。コピーして使ってください）"
-        embeds.append({"title": f"案{i}：{d.type}（{n}字）{over}", "description": desc, "color": _color(result.importance)})
+        embeds.append({"title": f"案{i}：{d.type}（{n}字）{over}", "description": desc, "color": color})
     return embeds
 
 
@@ -100,6 +105,49 @@ def send(payload: dict, settings: dict) -> None:
 
 def notify_item(item: Item, result: DraftResult, settings: dict) -> None:
     for chunk in _chunk_embeds(build_embeds(item, result, settings)):
+        send({"embeds": chunk}, settings)
+
+
+PROMO_COLOR = 0x9B59B6
+REASON_LABEL = {
+    "both": "視聴者維持率の山＋時刻付きコメント",
+    "comment": "時刻付きコメント",
+    "retention": "視聴者維持率の山",
+    "none": "見どころを特定できず（冒頭から）",
+}
+
+
+def build_promo_embeds(video, highlight, scene_url: str, result, settings: dict) -> list[dict]:
+    from youtube import mmss
+
+    lines = [
+        f"{video.views:,}回再生 ・ {video.published[:10]} 公開 ・ {mmss(video.duration)}",
+        "",
+    ]
+    if highlight.reason != "none":
+        lift = f"（前後より{highlight.lift * 100:.0f}%多く視聴）" if highlight.lift else ""
+        lines.append(f"**見どころ：{mmss(highlight.seconds)}** {result.scene}")
+        lines.append(f"根拠：{REASON_LABEL[highlight.reason]}{lift}")
+        for c in highlight.comments[:2]:
+            lines.append(f"> {_clip(' '.join(c.text.split()), 100)}（♥{c.likes}）")
+        lines.append("")
+        lines.append(f"[▶ 見どころシーンを開く（{mmss(max(0, highlight.seconds - 5))}から再生）]({scene_url})")
+        lines.append("一時停止して右クリック →「動画フレームをコピー」で画像にできます")
+    else:
+        lines.append(f"[▶ 動画を開く]({scene_url})")
+    head = {
+        "title": _clip(f"【過去動画の宣伝】{video.title}", EMBED_TITLE_MAX),
+        "url": f"https://youtu.be/{video.id}",
+        "color": PROMO_COLOR,
+        "description": _clip("\n".join(lines), EMBED_DESC_MAX),
+    }
+    if video.thumbnail:
+        head["thumbnail"] = {"url": video.thumbnail}
+    return [head] + draft_embeds(result.drafts, PROMO_COLOR, settings)
+
+
+def notify_promo(video, highlight, scene_url: str, result, settings: dict) -> None:
+    for chunk in _chunk_embeds(build_promo_embeds(video, highlight, scene_url, result, settings)):
         send({"embeds": chunk}, settings)
 
 
