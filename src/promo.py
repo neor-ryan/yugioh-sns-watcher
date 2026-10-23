@@ -64,8 +64,9 @@ def run(state: dict, settings: dict, dry_run: bool = False, rng: random.Random |
     log.info("宣伝する動画: %s（見どころ %s, %s）", video.title, youtube.mmss(highlight.seconds), highlight.reason)
 
     result = drafter.draft_promo(video, highlight, url, settings)
-    if result is None:
-        result = drafter.PromoResult(scene="", drafts=[])  # 下書き失敗でも動画と見どころは知らせる
+    if result is None:  # 下書き失敗でも、型だけ埋めた案と見どころは知らせる
+        text = drafter.render_promo(drafter.load_promo_template(), video, url, "（ここにシーンの一言）")
+        result = drafter.PromoResult(scene="", drafts=[drafter.Draft(type="型のみ", text=text)])
 
     if dry_run:
         print("=" * 70)

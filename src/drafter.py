@@ -17,34 +17,25 @@ ROOT = Path(__file__).resolve().parent.parent
 STYLE_PATH = ROOT / "config" / "style_examples.md"
 
 CATEGORIES = ["新規カード", "制限改訂", "新商品", "イベント", "その他"]
-DRAFT_TYPES = ["速報", "感想・考察", "動画/サイト誘導"]
 
+# 本人は自分で文章を書くことが多いので、ポスト案は「たたき台」1つだけ。書く材料としてポイントの箇条書きを付ける
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "importance": {"type": "integer", "description": "0〜100"},
         "summary": {"type": "string"},
         "category": {"type": "string", "enum": CATEGORIES},
-        "drafts": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": DRAFT_TYPES},
-                    "text": {"type": "string"},
-                },
-                "required": ["type", "text"],
-                "additionalProperties": False,
-            },
-        },
+        "points": {"type": "array", "items": {"type": "string"}},
+        "draft": {"type": "string"},
     },
-    "required": ["importance", "summary", "category", "drafts"],
+    "required": ["importance", "summary", "category", "points", "draft"],
     "additionalProperties": False,
 }
 
 SYSTEM_PROMPT = """\
 あなたは遊戯王OCGを扱うYouTubeチャンネル「ガチネタ！Freeデュエル」の運用者「けん」のSNS担当アシスタントです。
-遊戯王の公式（公式X・公式サイト）の新着情報を1件受け取り、次の3つを作ります。
+遊戯王の公式（公式X・公式サイト）の新着情報を1件受け取り、次のものを作ります。
+けんはポストを自分の言葉で書くことが多いので、「書く材料」を素早く渡すのが一番の目的です。
 
 1. importance（0〜100）: このチャンネルのフォロワー（遊戯王OCGプレイヤー）にとっての注目度。
    目安: 新規カード公開・リミットレギュレーション発表・新商品発表は高め（60〜100）、
@@ -52,15 +43,18 @@ SYSTEM_PROMPT = """\
    遊戯王OCG以外の話題（ラッシュデュエル、アニメ、グッズなど）や、発売済み商品の再告知・クイズ・初心者向け案内も低め。
 2. summary: 何が発表されたかを1〜2文で。公式の記述にない情報は足さない。
 3. category: 新規カード / 制限改訂 / 新商品 / イベント / その他 のいずれか。
-4. drafts: X用のポスト案を3つ。type は「速報」「感想・考察」「動画/サイト誘導」を1つずつ。
+4. points: ポストを書くときにそのまま使える事実の箇条書き（2〜5個）。
+   カード名・商品名・発売日・適用日・開催日など、公式の記述にある固有名詞や日付を正確に（「」で囲む）。
+   公式の文面にない情報・推測は入れない。装飾文字（𝐈𝐌𝐌𝐎𝐑𝐓𝐀𝐋 など）は普通の文字に直す。
+5. draft: X用のポスト案を1つだけ（たたき台）。短めでよい。
 
 ポスト案のルール:
 - 日本語で、本文は140文字以内。URLはシステムが末尾に自動で付けるので、本文にURLを書かない。
 - けんの口調に寄せる（下の過去ポスト例を参考に）。一人称は単数（「俺」「僕」「自分」など例に合わせる。「僕ら」「我々」は使わない）。
 - 根拠は渡された公式情報だけ。未確定情報・リーク・推測を事実として書かない。考察は「〜かも」「〜しそう」など推測だとわかる書き方にする。
 - ハッシュタグは0〜2個まで（例: #遊戯王）。
-- 動画を添付する前提の案は出さない（KONAMIの動画投稿ガイドラインでXへの動画投稿は不可）。「動画/サイト誘導」は、YouTubeやサイトで詳しく話す・まとめる、という誘導の文面にする。
-- 公式の情報量が少ないときも、書いてあること以上を盛らない。
+- 動画を添付する前提の案は出さない（KONAMIの動画投稿ガイドラインでXへの動画投稿は不可）。
+- 公式の情報量が少ないときも、書いてあること以上を盛らない。テンションは控えめ〜普通。
 
 ## けんの過去ポスト例（口調の参考）
 {style_examples}
@@ -79,6 +73,7 @@ class DraftResult:
     summary: str
     category: str
     drafts: list[Draft] = field(default_factory=list)
+    points: list[str] = field(default_factory=list)
 
 
 def load_style_examples() -> str:
@@ -107,14 +102,9 @@ def build_user_message(item: Item) -> str:
     return "\n".join(lines)
 
 
-def finalize_text(text: str, item: Item, draft_type: str, settings: dict) -> str:
+def finalize_text(text: str, item: Item) -> str:
     """本文末尾にURLを付ける。公式Xが元ネタなら投稿URL（引用表示になる）。"""
-    text = text.strip()
-    urls = [item.url]
-    promo = (settings.get("drafts") or {}).get("promo_url")
-    if draft_type == "動画/サイト誘導" and promo:
-        urls.insert(0, promo)
-    return text + "\n" + "\n".join(urls)
+    return text.strip() + "\n" + item.url
 
 
 def draft(item: Item, settings: dict, client: anthropic.Anthropic | None = None) -> DraftResult | None:
@@ -122,15 +112,12 @@ def draft(item: Item, settings: dict, client: anthropic.Anthropic | None = None)
     data = _request_json(system, build_user_message(item), OUTPUT_SCHEMA, settings, client)
     if data is None:
         return None
-    drafts = [
-        Draft(type=d["type"], text=finalize_text(d["text"], item, d["type"], settings))
-        for d in data.get("drafts", [])
-    ]
     return DraftResult(
         importance=max(0, min(100, int(data.get("importance", 0)))),
         summary=data.get("summary", ""),
         category=data.get("category", "その他"),
-        drafts=drafts,
+        drafts=[Draft(type="たたき台", text=finalize_text(data.get("draft", ""), item))] if data.get("draft") else [],
+        points=[p for p in data.get("points", []) if p.strip()],
     )
 
 
@@ -189,13 +176,15 @@ def _request_json(
 
 # ---- 過去動画の宣伝 ----
 
-PROMO_TYPES = ["見どころ紹介", "振り返り", "おすすめ"]
+# ポストの型は config/promo_template.md。AI が書くのは {scene_comment}（シーンについての1〜2行）だけ。
+PROMO_TEMPLATE_PATH = ROOT / "config" / "promo_template.md"
+PROMO_TYPES = ["シーン紹介", "見てほしいポイント", "ひとこと感想"]
 
 PROMO_SCHEMA = {
     "type": "object",
     "properties": {
         "scene": {"type": "string", "description": "見どころシーンを一言で（20字程度）"},
-        "drafts": {
+        "comments": {
             "type": "array",
             "items": {
                 "type": "object",
@@ -208,30 +197,32 @@ PROMO_SCHEMA = {
             },
         },
     },
-    "required": ["scene", "drafts"],
+    "required": ["scene", "comments"],
     "additionalProperties": False,
 }
 
 PROMO_SYSTEM_PROMPT = """\
 あなたは遊戯王OCGを扱うYouTubeチャンネル「ガチネタ！Freeデュエル」の運用者「けん」のSNS担当アシスタントです。
-チャンネルの過去動画を1本受け取り、その動画を改めて紹介するX用のポスト案を作ります。
-けんは投稿時に、見どころシーンのスクリーンショットを1枚添付します。
+チャンネルの過去動画を紹介するX用ポストのうち、「切り抜いたシーンについての1〜2行」だけを書きます。
+ポストの見出し・動画タイトル・URL・締めの一文は、決まった型でシステムが入れます。
+けんは投稿時に、見どころシーンのスクリーンショットを1枚添付します。そのシーンに触れる文章にしてください。
 
 作るもの:
 1. scene: 見どころシーンを一言で（20字程度）。視聴者コメントがあればそれを根拠にする。
-2. drafts: ポスト案を3つ。type は「見どころ紹介」「振り返り」「おすすめ」を1つずつ。
-   - 見どころ紹介: 添付するシーンに注目させる（「○分○秒〜のここ」のように時刻に触れてもよい）
-   - 振り返り: 投稿当時を振り返る、作者目線の一言
-   - おすすめ: まだ見ていない人に向けて、どんな人に刺さる動画かを伝える
+2. comments: シーンについての文章を3パターン。type は次の3つを1つずつ。
+   - シーン紹介: 「○分○秒〜」のように時刻に触れつつ、何が起きるシーンかを紹介する
+   - 見てほしいポイント: このシーンのどこに注目してほしいかを伝える
+   - ひとこと感想: 作者として、このシーンへの短い感想
+   それぞれ1〜2行、40〜60字くらい。短すぎて味気ない文にしない。
+   視聴者コメントが、プレイミスやルールへの疑問・指摘の内容なら、そこには触れない。
 
 ルール:
-- 日本語で、本文は140文字以内。動画のURLはシステムが末尾に付けるので、本文にURLを書かない。
 - けんの口調に寄せる（下の過去ポスト例を参考に）。一人称は単数。テンションは控えめ〜普通。わざとらしく叫ばない。
 - 根拠は動画タイトルと視聴者コメントだけ。書かれていないデッキの動き・結末・カード名を作らない。
-- 視聴者コメントは引用せず、内容を参考にする。コメントした人を特定できる書き方はしない。
-- ハッシュタグは0〜2個まで（例: #遊戯王 #ガチネタ）。
-- 動画を添付する前提の案は出さない（KONAMIの動画投稿ガイドラインでXへの動画投稿は不可）。
-- 「過去動画の宣伝です」のような前置きは書かない。
+  シーンの中身が分からないときは、「ここからの展開」「このターン」のようにぼかして書く。
+  タイトルにあるカード名やコンボが、その時刻のシーンで使われているとは限らない。コメントに書かれていない限り決めつけない。
+- 視聴者コメントの文をそのまま写さない。内容を参考に、けんの言葉で書く。
+- URL・ハッシュタグ・「高評価〜」のような締めの一文は書かない（型に入っている）。
 
 ## けんの過去ポスト例（口調の参考）
 {style_examples}
@@ -242,6 +233,20 @@ PROMO_SYSTEM_PROMPT = """\
 class PromoResult:
     scene: str
     drafts: list[Draft] = field(default_factory=list)
+
+
+def load_promo_template() -> str:
+    text = PROMO_TEMPLATE_PATH.read_text(encoding="utf-8") if PROMO_TEMPLATE_PATH.exists() else ""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+    return text or "{title}\n{url}\n\n{scene_comment}"
+
+
+def render_promo(template: str, video, scene_url: str, scene_comment: str) -> str:
+    # str.format だとタイトル中の { } で壊れるので、決まった名前だけ置き換える
+    out = template
+    for key, value in (("{title}", video.title), ("{url}", scene_url), ("{scene_comment}", scene_comment.strip())):
+        out = out.replace(key, value)
+    return out
 
 
 def build_promo_message(video, highlight, scene_url: str) -> str:
@@ -274,9 +279,13 @@ def draft_promo(video, highlight, scene_url: str, settings: dict, client: anthro
     data = _request_json(system, build_promo_message(video, highlight, scene_url), PROMO_SCHEMA, settings, client)
     if data is None:
         return None
+    template = load_promo_template()
     return PromoResult(
         scene=data.get("scene", ""),
-        drafts=[Draft(type=d["type"], text=d["text"].strip() + "\n" + scene_url) for d in data.get("drafts", [])],
+        drafts=[
+            Draft(type=c["type"], text=render_promo(template, video, scene_url, c["text"]))
+            for c in data.get("comments", [])
+        ],
     )
 
 

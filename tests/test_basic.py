@@ -58,7 +58,7 @@ class DraftAndNotifyTest(unittest.TestCase):
         self.item = Item("x", "123", "t", "本文", "https://x.com/YuGiOh_OCG_INFO/status/123")
 
     def test_finalize_appends_source_url(self):
-        text = finalize_text("新規カード公開！ #遊戯王", self.item, "速報", SETTINGS)
+        text = finalize_text("新規カード公開！ #遊戯王", self.item)
         self.assertTrue(text.endswith("https://x.com/YuGiOh_OCG_INFO/status/123"))
         self.assertEqual(body_length(text), len("新規カード公開！ #遊戯王"))
 
@@ -69,14 +69,16 @@ class DraftAndNotifyTest(unittest.TestCase):
 
     def test_embeds_fit_discord_limits(self):
         long_body = "あ" * 140
-        drafts = [Draft(t, finalize_text(long_body, self.item, t, SETTINGS)) for t in ("速報", "感想・考察", "動画/サイト誘導")]
-        result = DraftResult(80, "要約" * 50, "新規カード", drafts)
+        drafts = [Draft("たたき台", finalize_text(long_body, self.item))]
+        result = DraftResult(80, "要約" * 50, "新規カード", drafts, points=["「鬼神童鵄 タマヨリ」収録", "10/31発売"])
         embeds = notifier.build_embeds(self.item, result, SETTINGS)
-        self.assertEqual(len(embeds), 4)
+        self.assertEqual(len(embeds), 2)
+        self.assertIn("・「鬼神童鵄 タマヨリ」収録", embeds[0]["description"])
+        self.assertIn("元ネタURLだけ入れて投稿画面を開く", embeds[0]["description"])
+        self.assertIn("この文面で投稿", embeds[1]["description"])
         for e in embeds:
             self.assertLessEqual(len(e["description"]), 4096)
             self.assertLessEqual(len(e["title"]), 256)
-            self.assertIn("この文面で投稿", embeds[1]["description"])
         for chunk in notifier._chunk_embeds(embeds):
             self.assertLessEqual(sum(notifier._embed_size(e) for e in chunk), 6000)
 
@@ -158,6 +160,15 @@ class PromoTest(unittest.TestCase):
         self.assertEqual(youtube.pick_highlight(v, comments, []).seconds, 1382)  # コメントだけ → いいね最多
         self.assertEqual(youtube.pick_highlight(v, [], spikes).reason, "retention")
         self.assertEqual(youtube.pick_highlight(v, [], []).reason, "none")
+        # いいね1以下のコメントは使わない
+        weak = [youtube.Comment(715, "11:55 ここ素材にできなかったのでは", 0)]
+        self.assertEqual(youtube.pick_highlight(v, weak, [(720, 0.03)]).reason, "retention")
+
+    def test_usable_comment(self):
+        own = {"textDisplay": "2:36 のカード名表記が誤っています", "authorChannelId": {"value": "UCme"}}
+        self.assertFalse(youtube.is_usable_comment(own, "UCme"))
+        self.assertFalse(youtube.is_usable_comment({"textDisplay": "11:55 ゴーレムは素材にできなかったのでは"}, "UCme"))
+        self.assertTrue(youtube.is_usable_comment({"textDisplay": "30:55 ゲス声好きw", "authorChannelId": {"value": "UCx"}}, "UCme"))
 
     def test_timestamp_regex(self):
         found = [m.group(0) for m in youtube.TIMESTAMP_RE.finditer("19:12~ と 1:02:03 と 29:50〜")]
@@ -173,6 +184,16 @@ class PromoTest(unittest.TestCase):
         self.assertTrue(promo.is_due(at(19), {}, cfg))
         self.assertTrue(promo.is_due(at(22), {"promo": {"last_date": "2026-10-21"}}, cfg))  # 遅れても当日中に出す
         self.assertFalse(promo.is_due(at(22), {"promo": {"last_date": "2026-10-22"}}, cfg))
+
+    def test_render_promo_template(self):
+        v = self.video(title="【#遊戯王】{謎}の対戦【#ガチネタ】#100")
+        tpl = drafter.load_promo_template()
+        text = drafter.render_promo(tpl, v, "https://youtu.be/v1?t=10", "ここのシーン好き")
+        self.assertTrue(text.startswith("【過去動画紹介】"))
+        self.assertIn("【#遊戯王】{謎}の対戦【#ガチネタ】#100\nhttps://youtu.be/v1?t=10", text)
+        self.assertIn("ここのシーン好き", text)
+        self.assertNotIn("{scene_comment}", text)
+        self.assertNotIn("<!--", text)
 
     def test_promo_embeds_fit(self):
         v = self.video(duration=1954)

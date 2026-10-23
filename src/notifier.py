@@ -42,27 +42,32 @@ def _embed_size(embed: dict) -> int:
 
 
 def build_embeds(item: Item, result: DraftResult, settings: dict) -> list[dict]:
+    intent_base = settings["discord"].get("intent_base", "https://x.com/intent/post")
+    lines = [
+        f"重要度 **{result.importance}** ・ {SOURCE_LABEL.get(item.source, item.source)}",
+        f"元ネタ: [{_clip(item.title or item.url, 100)}]({item.url})",
+    ]
+    if result.points:
+        lines += ["", "**ポイント**"] + [f"・{p}" for p in result.points]
+    # 自分で書く用：元ネタURLだけ入った投稿画面
+    lines += ["", f"[✏️ 元ネタURLだけ入れて投稿画面を開く]({intent_url(chr(10) + item.url, intent_base)})"]
     head = {
         "title": _clip(f"【{result.category}】{result.summary}", EMBED_TITLE_MAX),
         "url": item.url,
         "color": _color(result.importance),
-        "description": _clip(
-            f"重要度 **{result.importance}** ・ {SOURCE_LABEL.get(item.source, item.source)}\n"
-            f"元ネタ: [{_clip(item.title or item.url, 100)}]({item.url})",
-            EMBED_DESC_MAX,
-        ),
+        "description": _clip("\n".join(lines), EMBED_DESC_MAX),
     }
     return [head] + draft_embeds(result.drafts, _color(result.importance), settings)
 
 
-def draft_embeds(drafts, color: int, settings: dict) -> list[dict]:
+def draft_embeds(drafts, color: int, settings: dict, check_length: bool = True) -> list[dict]:
     """ポスト案1つにつき embed 1つ（本文＋「この文面で投稿」リンク）。"""
     intent_base = settings["discord"].get("intent_base", "https://x.com/intent/post")
     limit = settings["drafts"].get("max_chars", 140)
     embeds = []
     for i, d in enumerate(drafts, 1):
         n = body_length(d.text)
-        over = f" ⚠️{limit}字超え" if n > limit else ""
+        over = f" ⚠️{limit}字超え" if check_length and n > limit else ""
         link = intent_url(d.text, intent_base)
         desc = f"```\n{d.text}\n```\n[▶ この文面で投稿]({link})"
         if len(desc) > EMBED_DESC_MAX:
@@ -144,7 +149,8 @@ def build_promo_embeds(video, highlight, scene_url: str, result, settings: dict)
     }
     if video.thumbnail:
         head["thumbnail"] = {"url": video.thumbnail}
-    return [head] + draft_embeds(result.drafts, PROMO_COLOR, settings)
+    # 宣伝は型にタイトルが入るので140字を超える（X Premium なので長文で投稿できる）
+    return [head] + draft_embeds(result.drafts, PROMO_COLOR, settings, check_length=False)
 
 
 def notify_promo(video, highlight, scene_url: str, result, settings: dict) -> None:

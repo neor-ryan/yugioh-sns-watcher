@@ -30,6 +30,7 @@ class Video:
     duration: int  # 秒
     views: int
     thumbnail: str | None = None
+    channel_id: str = ""
 
 
 @dataclass
@@ -96,9 +97,21 @@ def list_videos(handle: str) -> list[Video]:
                     duration=parse_duration(v["contentDetails"]["duration"]),
                     views=int(v["statistics"].get("viewCount", 0)),
                     thumbnail=best,
+                    channel_id=v["snippet"].get("channelId", ""),
                 )
             )
     return videos
+
+
+# ミスの指摘・訂正・ルールへの疑問は見どころにしない
+NG_WORDS = ("誤り", "誤って", "誤記", "訂正", "申し訳", "間違", "ミス", "できないのでは", "できなかったのでは", "裁定", "ルール上")
+
+
+def is_usable_comment(snippet: dict, channel_id: str) -> bool:
+    """チャンネル自身のコメント（訂正のお知らせなど）と、指摘系のコメントを除く。"""
+    if channel_id and (snippet.get("authorChannelId") or {}).get("value") == channel_id:
+        return False
+    return not any(w in snippet.get("textDisplay", "") for w in NG_WORDS)
 
 
 def timestamp_comments(video: Video, max_results: int = 100) -> list[Comment]:
@@ -112,6 +125,8 @@ def timestamp_comments(video: Video, max_results: int = 100) -> list[Comment]:
     out = []
     for th in data.get("items", []):
         s = th["snippet"]["topLevelComment"]["snippet"]
+        if not is_usable_comment(s, video.channel_id):
+            continue
         for m in TIMESTAMP_RE.finditer(s["textDisplay"]):
             t = int(m.group(1)) * 60 + int(m.group(2))
             if 0 < t < video.duration:
@@ -176,8 +191,16 @@ def retention_spikes(points: list[tuple[float, float]], duration: int, top: int 
     return picked
 
 
-def pick_highlight(video: Video, comments: list[Comment], spikes: list[tuple[int, float]], near: int = 45) -> Highlight:
-    """維持率の山とコメントが重なる所 → いいねの多いコメント → 維持率の山 の順で選ぶ。"""
+def pick_highlight(
+    video: Video, comments: list[Comment], spikes: list[tuple[int, float]], near: int = 45, min_likes: int = 2
+) -> Highlight:
+    """維持率の山とコメントが重なる所 → いいねの多いコメント → 維持率の山 の順で選ぶ。
+
+    いいねが min_likes 未満のコメントは使わない（「ここルール的に大丈夫？」のような1人の指摘を見どころにしないため）。
+    """
+    # 冒頭5%（デッキ紹介など）と最後3%は、維持率と同じく対象外
+    lo, hi = video.duration * 0.05, video.duration * 0.97
+    comments = [c for c in comments if c.likes >= min_likes and lo <= c.seconds <= hi]
     def nearby(t: int) -> list[Comment]:
         return sorted((c for c in comments if abs(c.seconds - t) <= near), key=lambda c: -c.likes)
 

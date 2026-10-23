@@ -240,6 +240,8 @@ def print_result(item: Item, result: DraftResult | None, settings: dict) -> None
         print("  → 下書き生成に失敗（通知時は新着のみ知らせます）")
         return
     print(f"重要度 {result.importance} / {result.category} / {result.summary}")
+    for p in result.points:
+        print(f"  ・{p}")
     for i, d in enumerate(result.drafts, 1):
         print(f"--- 案{i} {d.type}（本文 {drafter.body_length(d.text)} 字）")
         print(d.text)
@@ -261,16 +263,12 @@ def test_notify(settings: dict) -> None:
     except Exception as e:  # APIキー未設定でも通知だけは確認できるようにする
         log.warning("Claude を呼べなかったのでダミーの下書きで通知します: %s", e)
     if result is None:
-        texts = [
-            ("速報", "【テスト】通知のテストです。このリンクからX投稿画面が開けばOK！ #遊戯王"),
-            ("感想・考察", "テスト投稿の文面です。改行も\nちゃんと入るか確認。"),
-            ("動画/サイト誘導", "詳しくは動画で話します（テスト）"),
-        ]
         result = DraftResult(
             importance=80,
             summary="通知テスト用のダミーです",
             category="その他",
-            drafts=[Draft(t, drafter.finalize_text(x, item, t, settings)) for t, x in texts],
+            drafts=[Draft("たたき台", drafter.finalize_text("【テスト】このリンクからX投稿画面が開けばOK！ #遊戯王", item))],
+            points=["これはテストです", "「カード名」や発売日がここに並びます"],
         )
     notifier.notify_item(item, result, settings)
     log.info("テスト通知を送信しました")
