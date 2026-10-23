@@ -2,7 +2,7 @@
   "x_accounts": {
     "YuGiOh_OCG_INFO": {
       "user_id": "618646265",
-      "since_id": "2113238940803088836"
+      "since_id": "2113467831111254340"
     },
     "yu_gi_oh_jp": {
       "user_id": "866520026416730112",
@@ -10,7 +10,8 @@
     }
   },
   "site_seen_ids": [
-    "https://www.yugioh-card.com/japan/event/limitregulation/?list=202610",
+    "https://www.konami.com/yugioh/duelistfestival/fukuoka2027/",
+    "https://www.konami.com/yugioh/worldchampionship/2026/ja/",
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202607",
     "https://www.yugioh-card.com/japan/information/retailer/",
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202604",
@@ -87,7 +88,8 @@
     "https://www.yugioh-card.com/japan/revision/#date20140710",
     "https://www.yugioh-card.com/japan/revision/#date20140419",
     "https://www.yugioh-card.com/japan/revision/#date20140401",
-    "https://www.yugioh-card.com/japan/revision/#date20140308"
+    "https://www.yugioh-card.com/japan/revision/#date20140308",
+    "https://www.yugioh-card.com/japan/event/limitregulation/?list=202610"
   ],
   "promo": {
     "last_date": "2026-10-22",
@@ -96,5 +98,5 @@
       "lU3udDu7MC8": "2026-10-22"
     }
   },
-  "last_run": "2026-10-23T02:17:50+00:00"
+  "last_run": "2026-10-23T03:40:00+00:00"
 }
