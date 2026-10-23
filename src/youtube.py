@@ -48,6 +48,28 @@ class Highlight:
     comments: list[Comment] = field(default_factory=list)  # 見どころ付近のコメント
 
 
+EPISODE_RE = re.compile(r"#[A-Za-z]*-?\d+\s*$")
+
+
+def episode(title: str) -> str:
+    """タイトル末尾の通し番号（#118, #WPP2, #BETB-02 など）。無ければ空。"""
+    m = EPISODE_RE.search(title)
+    return m.group(0).strip() if m else ""
+
+
+def short_title(title: str) -> str:
+    """タイトルからキャッチコピーの部分だけを取り出す。
+
+    【#遊戯王】手札1枚で「エクゾディア」揃えるの簡単すぎたwww『HEROエクゾ』フリー対戦【#ガチネタ】#118
+      → 手札1枚で「エクゾディア」揃えるの簡単すぎたwww
+    """
+    t = EPISODE_RE.sub("", title)
+    t = re.sub(r"【[^】]*】", " ", t)
+    t = " ".join(t.split())
+    head = t.split("『", 1)[0].strip()
+    return head if head else t
+
+
 def parse_duration(iso: str) -> int:
     m = re.match(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso)
     if not m:

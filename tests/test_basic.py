@@ -11,7 +11,8 @@ import main  # noqa: E402
 import notifier  # noqa: E402
 import promo  # noqa: E402
 import youtube  # noqa: E402
-from drafter import Draft, DraftResult, body_length, finalize_text  # noqa: E402
+from drafter import Draft, DraftResult, finalize_text  # noqa: E402
+from xtext import x_length  # noqa: E402
 from sources import Item, official_site, x_official  # noqa: E402
 
 BASE = "https://www.yugioh-card.com/japan/news/"
@@ -60,7 +61,19 @@ class DraftAndNotifyTest(unittest.TestCase):
     def test_finalize_appends_source_url(self):
         text = finalize_text("新規カード公開！ #遊戯王", self.item)
         self.assertTrue(text.endswith("https://x.com/YuGiOh_OCG_INFO/status/123"))
-        self.assertEqual(body_length(text), len("新規カード公開！ #遊戯王"))
+        self.assertEqual(text.splitlines()[0], "新規カード公開！ #遊戯王")
+
+    def test_x_length(self):
+        self.assertEqual(x_length("あいう"), 6)
+        self.assertEqual(x_length("abc"), 3)
+        self.assertEqual(x_length("見て https://youtu.be/N9ckjVTq6_0?t=422"), 4 + 1 + 23)
+        # けんさんが実際に投稿しようとした文面は 293 で上限オーバー
+        ken = (
+            "【過去動画紹介】\n\n【#遊戯王】手札1枚で「エクゾディア」揃えるの簡単すぎたwww『HEROエクゾ』フリー対戦【#ガチネタ】#118\n"
+            "https://youtu.be/N9ckjVTq6_0?t=422\n\n「青竜の召喚師」を使ったエクゾ回！\n"
+            "ラストの「効果ではなく、ルールなんだな！」は我ながら気に入ってるフレーズかも\n\n気になった方はぜひ動画の方もチェック！"
+        )
+        self.assertEqual(x_length(ken), 293)
 
     def test_intent_url_roundtrip(self):
         text = "改行\nと #遊戯王 & 記号"
@@ -185,15 +198,34 @@ class PromoTest(unittest.TestCase):
         self.assertTrue(promo.is_due(at(22), {"promo": {"last_date": "2026-10-21"}}, cfg))  # 遅れても当日中に出す
         self.assertFalse(promo.is_due(at(22), {"promo": {"last_date": "2026-10-22"}}, cfg))
 
-    def test_render_promo_template(self):
-        v = self.video(title="【#遊戯王】{謎}の対戦【#ガチネタ】#100")
+    def test_short_title(self):
+        cases = {
+            "【#遊戯王】手札1枚で「エクゾディア」揃えるの簡単すぎたwww『HEROエクゾ』フリー対戦【#ガチネタ】#118":
+                "手札1枚で「エクゾディア」揃えるの簡単すぎたwww",
+            "【#遊戯王】魂の頂上決戦！俺たちの原点！『マアト』vs『創星神sophia』フリー対戦：Ma'at vs Sophia【#ガチネタ】#100":
+                "魂の頂上決戦！俺たちの原点！",
+            "【#遊戯王】「TGレシプロドラゴンフライ」2枚あれば「エクゾディア」が全て揃うのは絶対ダメだろ！【#ガチネタ】#201":
+                "「TGレシプロドラゴンフライ」2枚あれば「エクゾディア」が全て揃うのは絶対ダメだろ！",
+            "【#遊戯王】『究極のブラマジ』vs『至高のレッドアイズ』！【#ガチネタ】#LOCR-01":
+                "『究極のブラマジ』vs『至高のレッドアイズ』！",  # 『』始まりは全体を残す
+        }
+        for title, want in cases.items():
+            self.assertEqual(youtube.short_title(title), want)
+        self.assertEqual(youtube.episode("…【#ガチネタ】#BETB-02"), "#BETB-02")
+
+    def test_render_promo_template_fits_x(self):
+        v = self.video(title="【#遊戯王】手札1枚で「エクゾディア」揃えるの簡単すぎたwww『HEROエクゾ』フリー対戦【#ガチネタ】#118")
         tpl = drafter.load_promo_template()
-        text = drafter.render_promo(tpl, v, "https://youtu.be/v1?t=10", "ここのシーン好き")
-        self.assertTrue(text.startswith("【過去動画紹介】"))
-        self.assertIn("【#遊戯王】{謎}の対戦【#ガチネタ】#100\nhttps://youtu.be/v1?t=10", text)
-        self.assertIn("ここのシーン好き", text)
-        self.assertNotIn("{scene_comment}", text)
+        url = "https://youtu.be/N9ckjVTq6_0?t=422"
+        scene = "「青竜の召喚師」を使ったエクゾ回！\nラストの「効果ではなく、ルールなんだな！」は我ながら気に入ってるフレーズかも"
+        text = drafter.render_promo(tpl, v, url, scene)
+        self.assertTrue(text.startswith("【過去動画紹介】#118\n手札1枚で「エクゾディア」揃えるの簡単すぎたwww\n"))
+        self.assertTrue(text.endswith(url))
+        self.assertNotIn("{", text.replace("{謎}", ""))
         self.assertNotIn("<!--", text)
+        self.assertLessEqual(x_length(text), 280)
+        budget = drafter.promo_comment_budget(tpl, v, url)
+        self.assertGreaterEqual(budget, len(scene))  # けんさんの2行が入る余裕がある
 
     def test_promo_embeds_fit(self):
         v = self.video(duration=1954)

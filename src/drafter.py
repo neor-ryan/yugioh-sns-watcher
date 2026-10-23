@@ -10,6 +10,7 @@ from pathlib import Path
 import anthropic
 
 from sources import Item
+from xtext import LIMIT, x_length
 
 log = logging.getLogger(__name__)
 
@@ -213,7 +214,7 @@ PROMO_SYSTEM_PROMPT = """\
    - シーン紹介: 「○分○秒〜」のように時刻に触れつつ、何が起きるシーンかを紹介する
    - 見てほしいポイント: このシーンのどこに注目してほしいかを伝える
    - ひとこと感想: 作者として、このシーンへの短い感想
-   それぞれ1〜2行、40〜60字くらい。短すぎて味気ない文にしない。
+   それぞれ1〜2行。長さは「この動画で書ける字数」以内を厳守（X の文字数上限があるため）。その中で、短すぎて味気ない文にはしない。
    視聴者コメントが、プレイミスやルールへの疑問・指摘の内容なら、そこには触れない。
 
 ルール:
@@ -242,17 +243,33 @@ def load_promo_template() -> str:
 
 
 def render_promo(template: str, video, scene_url: str, scene_comment: str) -> str:
+    from youtube import episode, short_title
+
     # str.format だとタイトル中の { } で壊れるので、決まった名前だけ置き換える
+    values = {
+        "{episode}": episode(video.title),
+        "{short_title}": short_title(video.title),
+        "{title}": video.title,
+        "{url}": scene_url,
+        "{scene_comment}": scene_comment.strip(),
+    }
     out = template
-    for key, value in (("{title}", video.title), ("{url}", scene_url), ("{scene_comment}", scene_comment.strip())):
+    for key, value in values.items():
         out = out.replace(key, value)
     return out
 
 
-def build_promo_message(video, highlight, scene_url: str) -> str:
+def promo_comment_budget(template: str, video, scene_url: str, margin: int = 6) -> int:
+    """型に入れたあと X の上限（280）に収まる、シーンの一言の全角字数。"""
+    fixed = x_length(render_promo(template, video, scene_url, ""))
+    return max(20, (LIMIT - fixed - margin) // 2)
+
+
+def build_promo_message(video, highlight, scene_url: str, budget: int) -> str:
     from youtube import mmss
 
     lines = [
+        f"この動画で書ける字数: 1パターンあたり全角{budget}字以内（改行も1字と数える）",
         f"動画タイトル: {video.title}",
         f"公開日: {video.published[:10]}",
         f"再生回数: {video.views:,}回",
@@ -276,10 +293,11 @@ def build_promo_message(video, highlight, scene_url: str) -> str:
 
 def draft_promo(video, highlight, scene_url: str, settings: dict, client: anthropic.Anthropic | None = None) -> PromoResult | None:
     system = PROMO_SYSTEM_PROMPT.format(style_examples=load_style_examples())
-    data = _request_json(system, build_promo_message(video, highlight, scene_url), PROMO_SCHEMA, settings, client)
+    template = load_promo_template()
+    budget = promo_comment_budget(template, video, scene_url)
+    data = _request_json(system, build_promo_message(video, highlight, scene_url, budget), PROMO_SCHEMA, settings, client)
     if data is None:
         return None
-    template = load_promo_template()
     return PromoResult(
         scene=data.get("scene", ""),
         drafts=[
@@ -288,7 +306,3 @@ def draft_promo(video, highlight, scene_url: str, settings: dict, client: anthro
         ],
     )
 
-
-def body_length(text: str) -> int:
-    """URL行を除いた本文の文字数。"""
-    return len("\n".join(line for line in text.splitlines() if not line.startswith("http")).strip())

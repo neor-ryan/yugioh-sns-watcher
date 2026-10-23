@@ -46,9 +46,6 @@ claude:
   # 安全分類器の誤拒否時にサーバー側で別モデルへ切り替える（beta）。Haiku は非対応なので false。Sonnet に戻すなら true
   fallbacks: false
 
-drafts:
-  max_chars: 140
-
 promo:
   # 過去動画の宣伝。毎時の通常監視のついでに、hour_jst 時を過ぎて今日まだなら1本出す（19:17ごろ届く）
   enabled: true

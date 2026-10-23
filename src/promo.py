@@ -4,18 +4,14 @@ from __future__ import annotations
 import logging
 import math
 import random
-import re
 from datetime import date, datetime, timedelta, timezone
 
 import drafter
 import notifier
 import youtube
+from xtext import x_length
 
 log = logging.getLogger(__name__)
-
-# 対戦動画のタイトル末尾の通し番号（#100, #WPP2, #LOCR-01 など）
-EPISODE_RE = re.compile(r"#[A-Za-z]*-?\d+\s*$")
-
 
 def candidates(videos: list[youtube.Video], history: dict[str, str], cfg: dict, today: date) -> list[youtube.Video]:
     """宣伝できる動画：対戦動画（通し番号あり）・一定の長さ以上・公開から一定日数・最近宣伝していない。"""
@@ -23,7 +19,7 @@ def candidates(videos: list[youtube.Video], history: dict[str, str], cfg: dict, 
     recent = today - timedelta(days=cfg.get("repeat_after_days", 120))
     out = []
     for v in videos:
-        if not EPISODE_RE.search(v.title) or v.duration < cfg.get("min_duration_seconds", 300):
+        if not youtube.episode(v.title) or v.duration < cfg.get("min_duration_seconds", 300):
             continue
         if date.fromisoformat(v.published[:10]) > min_published:
             continue
@@ -75,7 +71,7 @@ def run(state: dict, settings: dict, dry_run: bool = False, rng: random.Random |
         for c in highlight.comments:
             print("  コメント:", c.likes, " ".join(c.text.split())[:80])
         for d in result.drafts:
-            print(f"--- {d.type}（{drafter.body_length(d.text)}字）\n{d.text}")
+            print(f"--- {d.type}（X換算 {x_length(d.text)}/280）\n{d.text}")
         return True
 
     notifier.notify_promo(video, highlight, url, result, settings)

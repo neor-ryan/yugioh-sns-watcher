@@ -8,8 +8,10 @@ from urllib.parse import quote
 
 import requests
 
-from drafter import DraftResult, body_length
+from drafter import DraftResult
 from sources import Item
+from xtext import LIMIT as X_LIMIT
+from xtext import x_length
 
 log = logging.getLogger(__name__)
 
@@ -60,19 +62,18 @@ def build_embeds(item: Item, result: DraftResult, settings: dict) -> list[dict]:
     return [head] + draft_embeds(result.drafts, _color(result.importance), settings)
 
 
-def draft_embeds(drafts, color: int, settings: dict, check_length: bool = True) -> list[dict]:
-    """ポスト案1つにつき embed 1つ（本文＋「この文面で投稿」リンク）。"""
+def draft_embeds(drafts, color: int, settings: dict) -> list[dict]:
+    """ポスト案1つにつき embed 1つ（本文＋「この文面で投稿」リンク）。文字数は X の数え方で表示する。"""
     intent_base = settings["discord"].get("intent_base", "https://x.com/intent/post")
-    limit = settings["drafts"].get("max_chars", 140)
     embeds = []
     for i, d in enumerate(drafts, 1):
-        n = body_length(d.text)
-        over = f" ⚠️{limit}字超え" if check_length and n > limit else ""
+        n = x_length(d.text)
+        over = f" ⚠️{n - X_LIMIT}オーバー" if n > X_LIMIT else ""
         link = intent_url(d.text, intent_base)
         desc = f"```\n{d.text}\n```\n[▶ この文面で投稿]({link})"
         if len(desc) > EMBED_DESC_MAX:
             desc = f"```\n{d.text}\n```\n（本文が長すぎて投稿リンクを作れませんでした。コピーして使ってください）"
-        embeds.append({"title": f"案{i}：{d.type}（{n}字）{over}", "description": desc, "color": color})
+        embeds.append({"title": f"案{i}：{d.type}（X換算 {n}/{X_LIMIT}）{over}", "description": desc, "color": color})
     return embeds
 
 
@@ -149,8 +150,7 @@ def build_promo_embeds(video, highlight, scene_url: str, result, settings: dict)
     }
     if video.thumbnail:
         head["thumbnail"] = {"url": video.thumbnail}
-    # 宣伝は型にタイトルが入るので140字を超える（X Premium なので長文で投稿できる）
-    return [head] + draft_embeds(result.drafts, PROMO_COLOR, settings, check_length=False)
+    return [head] + draft_embeds(result.drafts, PROMO_COLOR, settings)
 
 
 def notify_promo(video, highlight, scene_url: str, result, settings: dict) -> None:

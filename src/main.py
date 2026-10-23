@@ -23,6 +23,7 @@ import promo
 import state as state_mod
 from drafter import Draft, DraftResult
 from sources import Item, official_site, x_official
+from xtext import x_length
 
 ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = ROOT / "config" / "settings.yaml"
@@ -243,7 +244,7 @@ def print_result(item: Item, result: DraftResult | None, settings: dict) -> None
     for p in result.points:
         print(f"  ・{p}")
     for i, d in enumerate(result.drafts, 1):
-        print(f"--- 案{i} {d.type}（本文 {drafter.body_length(d.text)} 字）")
+        print(f"--- 案{i} {d.type}（X換算 {x_length(d.text)}/280）")
         print(d.text)
         print(f"    投稿リンク: {notifier.intent_url(d.text, base)[:120]}…")
 
