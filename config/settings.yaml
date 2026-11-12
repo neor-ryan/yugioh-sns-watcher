@@ -56,6 +56,6 @@ promo:
   min_duration_seconds: 300
 
 discord:
-  username: 遊戯王SNSウォッチャー
+  username: 情報係
   # 動かない場合は https://twitter.com/intent/tweet を試す
   intent_base: https://x.com/intent/post
