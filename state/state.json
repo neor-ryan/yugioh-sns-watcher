@@ -10,7 +10,6 @@
     }
   },
   "site_seen_ids": [
-    "https://www.konami.com/yugioh/duelistfestival/fukuoka2027/",
     "https://www.konami.com/yugioh/worldchampionship/2026/ja/",
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202607",
     "https://www.yugioh-card.com/japan/information/retailer/",
@@ -89,6 +88,7 @@
     "https://www.yugioh-card.com/japan/revision/#date20140419",
     "https://www.yugioh-card.com/japan/revision/#date20140401",
     "https://www.yugioh-card.com/japan/revision/#date20140308",
+    "https://www.konami.com/yugioh/duelistfestival/fukuoka2027/",
     "https://www.yugioh-card.com/japan/event/limitregulation/?list=202610"
   ],
   "promo": {
@@ -127,5 +127,5 @@
       "JkRZAEnmbcU": "2026-11-23"
     }
   },
-  "last_run": "2026-11-24T08:17:47+00:00"
+  "last_run": "2026-11-24T09:17:55+00:00"
 }
